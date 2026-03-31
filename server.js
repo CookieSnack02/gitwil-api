@@ -40,6 +40,10 @@ app.get('/', (req, res) => {
 });
 
 // --- Retorna o código da sala ativa (para QR Code estático) ---
+// LIMITAÇÃO: retorna apenas a PRIMEIRA sala da lista.
+// Se houver múltiplos professores com salas abertas ao mesmo tempo,
+// alunos que entrarem pelo QR estático podem cair na sala errada.
+// Funciona corretamente apenas quando há uma única sala ativa por vez.
 app.get('/api/sala-ativa', (req, res) => {
     const codigos = Object.keys(salas);
     if (codigos.length > 0) {
@@ -70,7 +74,11 @@ app.post('/api/login', (req, res) => {
     }
 });
 
-// --- LÓGICA DO JOGO ---
+// --- LÓGICA DO CÓDIGO ---
+// ATENÇÃO: todo o estado das salas fica em memória RAM.
+// Se o servidor Railway reiniciar (deploy, inatividade, crash), todas as salas
+// são perdidas — professores com sessões ativas perderão os dados da aula.
+// Solução definitiva exigiria persistência em banco de dados (ex: Redis, SQLite).
 const salas = {};
 
 function gerarCodigoAleatorio(qtdDigitos) {
@@ -113,6 +121,16 @@ io.on('connection', (socket) => {
                 return;
             }
             if (salas[codigoManual]) {
+                // Verifica se o professor que criou esta sala ainda está conectado pelo socket.id original.
+                // Conectado → sala realmente em uso, recusa a criação.
+                // Desconectado → professor fechou o browser sem clicar "Encerrar Sessão" (sala fantasma),
+                //                 pode sobrescrever com segurança.
+                //
+                // PONTO FRACO: após reconexão do professor (F5 ou queda de rede), o socket.id muda.
+                // criadorSocketId continua apontando para o socket antigo (já desconectado).
+                // Se nesse momento alguém tentar criar o mesmo código, a sala ativa seria deletada.
+                // Na prática essa janela é de milissegundos e o risco é muito baixo.
+                // Solução definitiva exigiria autenticação por token persistente no WebSocket.
                 const criadorConectado = io.sockets.sockets.has(salas[codigoManual].criadorSocketId);
                 if (criadorConectado) {
                     socket.emit('erro_criar_sala', 'Esse código já está em uso. Escolha outro.');
@@ -133,6 +151,12 @@ io.on('connection', (socket) => {
                     socket.emit('erro_criar_sala', 'Não foi possível gerar um código único.');
                     return;
                 }
+                // Mesma lógica do código manual: se o código gerado pertence a uma sala
+                // fantasma (criador desconectado), limpa para liberar o código.
+                if (salas[codigo] && !io.sockets.sockets.has(salas[codigo].criadorSocketId)) {
+                    delete salas[codigo];
+                    console.log(`Sala fantasma ${codigo} removida durante geração aleatória.`);
+                }
             } while (salas[codigo]);
         }
 
@@ -150,6 +174,8 @@ io.on('connection', (socket) => {
             respostasDiscursivas: [],
             total: 0,
             voters: new Set(),
+            // Guarda o socket.id do professor criador para detectar salas fantasmas.
+            // Usado na checagem de criar_sala acima. Torna-se desatualizado após reconexão do professor.
             criadorSocketId: socket.id
         };
 
@@ -158,6 +184,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('entrar_sala', (dados) => {
+        // NOTA: este evento é usado tanto por alunos quanto pelo professor ao reconectar (F5).
+        // Não há como distinguir os dois aqui sem autenticação no socket do professor.
+        // Por isso, criadorSocketId NÃO é atualizado na reconexão — veja o comentário em criar_sala.
         const { codigo } = dados;
         if (salas[codigo]) {
             socket.join(codigo);
@@ -205,6 +234,9 @@ io.on('connection', (socket) => {
             }
 
             if (salas[codigo].config.tipoPergunta === 'discursiva') {
+                // LIMITAÇÃO: não há validação de tamanho nem limite de entradas.
+                // Um aluno poderia enviar um texto muito longo, consumindo memória.
+                // Considere adicionar: if (typeof respostas !== 'string' || respostas.length > 500) return;
                 salas[codigo].respostasDiscursivas.push(respostas);
                 io.to(codigo).emit('atualizar_discursivas', salas[codigo].respostasDiscursivas);
             } else {
