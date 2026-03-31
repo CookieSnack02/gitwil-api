@@ -113,8 +113,14 @@ io.on('connection', (socket) => {
                 return;
             }
             if (salas[codigoManual]) {
-                socket.emit('erro_criar_sala', 'Esse código já está em uso. Escolha outro.');
-                return;
+                const criadorConectado = io.sockets.sockets.has(salas[codigoManual].criadorSocketId);
+                if (criadorConectado) {
+                    socket.emit('erro_criar_sala', 'Esse código já está em uso. Escolha outro.');
+                    return;
+                }
+                // Professor da sessão anterior desconectou sem encerrar — limpa a sala fantasma
+                delete salas[codigoManual];
+                console.log(`Sala fantasma ${codigoManual} removida ao recriar.`);
             }
             codigo = codigoManual;
         } else {
@@ -143,7 +149,8 @@ io.on('connection', (socket) => {
             votos: montarObjetoVotos(configInicial),
             respostasDiscursivas: [],
             total: 0,
-            voters: new Set()
+            voters: new Set(),
+            criadorSocketId: socket.id
         };
 
         socket.emit('sala_criada', codigo);
