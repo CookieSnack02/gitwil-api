@@ -4,6 +4,10 @@ const http = require('http');
 const cors = require('cors');
 const { Server } = require("socket.io");
 
+// Nao estava carregando os aquivos .env toda lugar que fazia usso do process.env havia um pipe "||" o que levava a um fall back 
+// por isso adicionei essa biblioteca para que possamos trabalhar com Configurações de ambiente
+require('dotenv/config');
+
 const server = http.createServer(app);
 
 // ============================================================
@@ -12,8 +16,10 @@ const server = http.createServer(app);
 const ORIGENS_PERMITIDAS = [
     'https://gitwil.com.br',
     'https://www.gitwil.com.br',
+    
     // Para testes locais, descomente as linhas abaixo:
-    // 'http://localhost:5500',
+    // 'http://127.0.0.1:5500',
+    // 'http://localhost:3030',
     // 'http://127.0.0.1:5500',
 ];
 
@@ -290,6 +296,13 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+app.get('/qtd_respostas', (req, res) => {
+
+    const codigo = req.query.codigo;
+
+    res.send(salas[codigo].total);
+})
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
