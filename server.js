@@ -208,6 +208,11 @@ io.on('connection', (socket) => {
 
             if (salas[codigo].voters.has(alunoId)) {
                 socket.emit('bloquear_voto');
+            } else {
+                // Garante que o cliente esteja desbloqueado (cobre o caso de
+                // reconexão após reset: o aluno perdeu o evento 'reset_aluno'
+                // enquanto estava desconectado, mas o servidor já limpou voters).
+                socket.emit('reset_aluno');
             }
         } else {
             socket.emit('erro_sala', 'Sala não encontrada.');
