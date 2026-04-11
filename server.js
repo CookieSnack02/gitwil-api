@@ -1,12 +1,15 @@
-const express = require('express');
-const app = express();
-const http = require('http');
-const cors = require('cors');
-const { Server } = require("socket.io");
 
+import express from 'express';
+import http from 'http';
+import cors from 'cors';
+import { Server } from "socket.io";
+import Sala from './Sala.js'
+import crypto from 'crypto';
+import 'dotenv/config';
+
+const app = express();
 // Nao estava carregando os aquivos .env toda lugar que fazia usso do process.env havia um pipe "||" o que levava a um fall back 
 // por isso adicionei essa biblioteca para que possamos trabalhar com Configurações de ambiente
-require('dotenv/config');
 
 const server = http.createServer(app);
 
@@ -16,11 +19,11 @@ const server = http.createServer(app);
 const ORIGENS_PERMITIDAS = [
     'https://gitwil.com.br',
     'https://www.gitwil.com.br',
+    'http://localhost:3030',
     
-    // Para testes locais, descomente as linhas abaixo:
     // 'http://127.0.0.1:5500',
-    // 'http://localhost:3030',
     // 'http://127.0.0.1:5500',
+    // Para testes locais, descomente as linhas acima
 ];
 
 // CORS para rotas HTTP (Express)
@@ -68,8 +71,6 @@ app.get('/api/sala-ativa', (req, res) => {
 });
 
 // --- SEGURANÇA ---
-const crypto = require('crypto');
-
 const ADMIN_USER = process.env.ADMIN_USER || "wilson";
 const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || "df52552b4e09eb2a3e3cbb9b53b1d499260147c789e3b699b1e921252379672b";
 
@@ -100,21 +101,6 @@ function gerarCodigoAleatorio(qtdDigitos) {
     const min = Math.pow(10, digitos - 1);
     const max = Math.pow(10, digitos) - 1;
     return Math.floor(min + Math.random() * (max - min + 1)).toString();
-}
-
-function montarObjetoVotos(config) {
-    const votos = {};
-    if (config.tipoPergunta === 'certo_errado') {
-        votos['Certo'] = 0;
-        votos['Errado'] = 0;
-    } else if (config.tipoPergunta === 'multipla_escolha') {
-        const letras = ['A', 'B', 'C', 'D', 'E', 'Não sei'];
-        const qtd = parseInt(config.qtdOpcoes) || 4;
-        for (let i = 0; i < qtd; i++) {
-            votos[letras[i]] = 0;
-        }
-    }
-    return votos;
 }
 
 io.on('connection', (socket) => {
@@ -176,22 +162,7 @@ io.on('connection', (socket) => {
 
         socket.join(codigo);
 
-        const configInicial = {
-            tipoPergunta: 'multipla_escolha',
-            modoSelecao: 'unica',
-            qtdOpcoes: 4
-        };
-
-        salas[codigo] = {
-            config: configInicial,
-            votos: montarObjetoVotos(configInicial),
-            respostasDiscursivas: [],
-            total: 0,
-            voters: new Set(),
-            // Guarda o socket.id do professor criador para detectar salas fantasmas.
-            // Usado na checagem de criar_sala acima. Torna-se desatualizado após reconexão do professor.
-            criadorSocketId: socket.id
-        };
+        salas[codigo] = new Sala(socket.id);
 
         socket.emit('sala_criada', codigo);
         socket.emit('atualizar_config_aluno', salas[codigo].config);
@@ -206,12 +177,12 @@ io.on('connection', (socket) => {
             socket.join(codigo);
             socket.emit('entrada_ok');                                              //Referenciado na linha 171-174 de aluno.html 
             socket.emit('atualizar_config_aluno', salas[codigo].config);            //Referenciado a 178 - 183 de aluno.html   
-            socket.emit('atualizar_stats_aluno', { total: salas[codigo].total });   //Referenciado linha 185 aluno.html 
+            socket.emit('atualizar_stats_aluno', { total: salas[codigo].total_votos });   //Referenciado linha 185 aluno.html 
 
             if (salas[codigo].config.tipoPergunta === 'discursiva') {
-                socket.emit('atualizar_discursivas', salas[codigo].respostasDiscursivas);
+                socket.emit('atualizar_discursivas', salas[codigo].respostas['res_discursivas']);
             } else {
-                socket.emit('atualizar_grafico', salas[codigo].votos);
+                socket.emit('atualizar_grafico', salas[codigo].respostas);
             }
             /*  Problema de bloqueio de votação  */
             if (salas[codigo].voters.has(alunoId)) {
@@ -230,17 +201,14 @@ io.on('connection', (socket) => {
     socket.on('alterar_config', (dados) => {
         const { codigo, novaConfig } = dados;
         if (salas[codigo]) {
-            salas[codigo].config = novaConfig;
-            salas[codigo].votos = montarObjetoVotos(novaConfig);
-            salas[codigo].respostasDiscursivas = [];
-            salas[codigo].total = 0;
-            salas[codigo].voters.clear();
+
+            salas[codigo].resetarConfig(novaConfig);
 
             io.to(codigo).emit('atualizar_config_aluno', novaConfig);
-            io.to(codigo).emit('atualizar_grafico', salas[codigo].votos);
+            io.to(codigo).emit('atualizar_grafico', salas[codigo].total_votos);
             io.to(codigo).emit('atualizar_discursivas', []);
             io.to(codigo).emit('reset_aluno');
-            io.to(codigo).emit('atualizar_stats_aluno', { total: 0 });
+            io.to(codigo).emit('atualizar_stats_aluno', { total: 0 });            
         }
     });
 
@@ -256,36 +224,32 @@ io.on('connection', (socket) => {
                 // LIMITAÇÃO: não há validação de tamanho nem limite de entradas.
                 // Um aluno poderia enviar um texto muito longo, consumindo memória.
                 // Considere adicionar: if (typeof respostas !== 'string' || respostas.length > 500) return;
-                salas[codigo].respostasDiscursivas.push(respostas);
-                io.to(codigo).emit('atualizar_discursivas', salas[codigo].respostasDiscursivas);
+                salas[codigo].respostas['res_discursivas'].push(respostas);
+                io.to(codigo).emit('atualizar_discursivas', salas[codigo].respostas['res_discursivas']);
             } else {
                 if (Array.isArray(respostas)) {
                     respostas.forEach(opcao => {
-                        if (salas[codigo].votos[opcao] !== undefined) salas[codigo].votos[opcao]++;
+                        if (salas[codigo].respostas[opcao] !== undefined) salas[codigo].respostas[opcao]++;
                     });
                 } else {
-                    if (salas[codigo].votos[respostas] !== undefined) salas[codigo].votos[respostas]++;
+                    if (salas[codigo].respostas[respostas] !== undefined) salas[codigo].respostas[respostas]++;
                 }
-                io.to(codigo).emit('atualizar_grafico', salas[codigo].votos);
+                io.to(codigo).emit('atualizar_grafico', salas[codigo].respostas);
             }
 
             salas[codigo].voters.add(alunoId);
-            salas[codigo].total++;
-            io.to(codigo).emit('atualizar_stats_aluno', { total: salas[codigo].total });
+            salas[codigo].total_votos++;
+            io.to(codigo).emit('atualizar_stats_aluno', { total: salas[codigo].total_votos });
             socket.emit('voto_confirmado');
         }
     });
 
     socket.on('resetar_sala', (codigo) => {
         if (salas[codigo]) {
-            const chaves = Object.keys(salas[codigo].votos);
-            chaves.forEach(k => salas[codigo].votos[k] = 0);
 
-            salas[codigo].respostasDiscursivas = [];
-            salas[codigo].total = 0;
-            salas[codigo].voters.clear();
+            salas[codigo].resetarSala()
 
-            io.to(codigo).emit('atualizar_grafico', salas[codigo].votos);
+            io.to(codigo).emit('atualizar_grafico', salas[codigo].respostas);
             io.to(codigo).emit('atualizar_discursivas', []);
             io.to(codigo).emit('reset_aluno');
             io.to(codigo).emit('atualizar_stats_aluno', { total: 0 });
