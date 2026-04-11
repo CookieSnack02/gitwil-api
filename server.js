@@ -46,17 +46,25 @@ app.get('/', (req, res) => {
 });
 
 // --- Retorna o código da sala ativa (para QR Code estático) ---
-// LIMITAÇÃO: retorna apenas a PRIMEIRA sala da lista.
-// Se houver múltiplos professores com salas abertas ao mesmo tempo,
-// alunos que entrarem pelo QR estático podem cair na sala errada.
-// Funciona corretamente apenas quando há uma única sala ativa por vez.
+// Varre todas as salas em memória e remove as "fantasmas" antes de responder.
+// Uma sala fantasma é aquela cujo professor criador não está mais conectado
+// (fechou o navegador sem clicar em "Encerrar Sessão").
+// A detecção usa io.sockets.sockets.has(criadorSocketId): se o socket do
+// professor não existe mais no servidor, a sala é deletada na hora.
+// Após a limpeza, retorna a primeira sala restante (sala real ativa).
+// LIMITAÇÃO que permanece: se dois professores estiverem com salas abertas
+// ao mesmo tempo, o aluno sem código ainda pode cair na sala errada.
 app.get('/api/sala-ativa', (req, res) => {
-    const codigos = Object.keys(salas);
-    if (codigos.length > 0) {
-        res.json({ codigo: codigos[0] });
-    } else {
-        res.json({ codigo: null });
+    for (const codigo of Object.keys(salas)) {
+        const criadorConectado = io.sockets.sockets.has(salas[codigo].criadorSocketId);
+        if (!criadorConectado) {
+            delete salas[codigo];
+            console.log(`Sala fantasma ${codigo} removida por /api/sala-ativa.`);
+        }
     }
+
+    const codigosRestantes = Object.keys(salas);
+    res.json({ codigo: codigosRestantes.length > 0 ? codigosRestantes[0] : null });
 });
 
 // --- SEGURANÇA ---
@@ -110,7 +118,7 @@ function montarObjetoVotos(config) {
 }
 
 io.on('connection', (socket) => {
-    const alunoId = socket.handshake.auth.alunoId || socket.id;
+    const alunoId = socket.handshake.auth.alunoId || socket.id; 
 
     socket.on('criar_sala', (opcoes) => {
         let codigo;
@@ -196,16 +204,16 @@ io.on('connection', (socket) => {
         const { codigo } = dados;
         if (salas[codigo]) {
             socket.join(codigo);
-            socket.emit('entrada_ok');
-            socket.emit('atualizar_config_aluno', salas[codigo].config);
-            socket.emit('atualizar_stats_aluno', { total: salas[codigo].total });
+            socket.emit('entrada_ok');                                              //Referenciado na linha 171-174 de aluno.html 
+            socket.emit('atualizar_config_aluno', salas[codigo].config);            //Referenciado a 178 - 183 de aluno.html   
+            socket.emit('atualizar_stats_aluno', { total: salas[codigo].total });   //Referenciado linha 185 aluno.html 
 
             if (salas[codigo].config.tipoPergunta === 'discursiva') {
                 socket.emit('atualizar_discursivas', salas[codigo].respostasDiscursivas);
             } else {
                 socket.emit('atualizar_grafico', salas[codigo].votos);
             }
-
+            /*  Problema de bloqueio de votação  */
             if (salas[codigo].voters.has(alunoId)) {
                 socket.emit('bloquear_voto');
             } else {
