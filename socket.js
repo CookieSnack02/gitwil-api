@@ -29,14 +29,12 @@ export default class SocketManager{
                 if (opcoes && opcoes.codigoManual && opcoes.codigoManual.trim() !== '') {
                     const codigoManual = opcoes.codigoManual.trim();
 
-                    if (!/^\d+$/.test(codigoManual)) {
-                        socket.emit('erro_criar_sala', 'O código deve conter apenas números.');
+                    //compactei as duas formas em uma so e tirei o regex, imagino que sem regex talvez traga mais legibilidade.
+                    if (codigoManual.length < 3 || codigoManual.length > 10 || isNaN(Number(codigoManual))) {
+                        socket.emit('erro_criar_sala', 'O código deve conter apenas números e ter entre 3 e 10 dígitos.');
                         return;
                     }
-                    if (codigoManual.length < 3 || codigoManual.length > 10) {
-                        socket.emit('erro_criar_sala', 'O código deve ter entre 3 e 10 dígitos.');
-                        return;
-                    }
+
                     if (salas[codigoManual]) {
                         // Verifica se o professor que criou esta sala ainda está conectado pelo socket.id original.
                         // Conectado → sala realmente em uso, recusa a criação.
