@@ -1,4 +1,4 @@
-import { montarObjetoRespostas } from './VotosStruct.js'
+import { montarObjetoRespostas } from './project_lib/VotosStruct.js'
 
 const configInicial = {
     tipoPergunta: 'multipla_escolha',
@@ -36,6 +36,34 @@ export default class Sala{
         this.voters.clear();
     }
 
-    
+    checkAlunoVotou(alunoId){
+        if(this.voters.has(alunoId)){
+            throw new Error('Você já respondeu!');
+        }
+    }
+
+    registrarVotoAluno(alunoId){
+        this.voters.add(alunoId);
+        this.total_votos++;
+    }
+
+    guardaRespostasDiscursiva(resposta){
+
+        if (resposta.length > 500) 
+            throw new RangeError("Texto excede o limite de 500 caracteres");
+                
+        this.respostas['res_discursivas'].push(resposta);
+
+    } 
+
+    guardaRespostasObjetivas(resposta){
+
+        const opcoes = Array.isArray(resposta) ? resposta : [resposta];
+
+        opcoes.forEach(opcao => {
+            if (this.respostas[opcao] !== undefined) this.respostas[opcao]++;
+        });
+
+    }
     
 }

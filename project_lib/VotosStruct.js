@@ -1,7 +1,4 @@
 
-
-
-
 export function montarObjetoRespostas(config) {
     const votos = {};
     if (config.tipoPergunta === 'certo_errado') {
