@@ -7,7 +7,6 @@ export const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || "df52552b4e09eb2a3
 export const ORIGENS_PERMITIDAS = [
     'https://gitwil.com.br',
     'https://www.gitwil.com.br',
-    // 'http://localhost:5173',
     // 'http://localhost:3030',
     // 'http://127.0.0.1:5500',
     // 'http://127.0.0.1:5500',
