@@ -36,16 +36,6 @@ export default class SocketManager{
                     }
 
                     if (salas[codigoManual]) {
-                        // Verifica se o professor que criou esta sala ainda está conectado pelo socket.id original.
-                        // Conectado → sala realmente em uso, recusa a criação.
-                        // Desconectado → professor fechou o browser sem clicar "Encerrar Sessão" (sala fantasma),
-                        //                 pode sobrescrever com segurança.
-                        //
-                        // PONTO FRACO: após reconexão do professor (F5 ou queda de rede), o socket.id muda.
-                        // criadorSocketId continua apontando para o socket antigo (já desconectado).
-                        // Se nesse momento alguém tentar criar o mesmo código, a sala ativa seria deletada.
-                        // Na prática essa janela é de milissegundos e o risco é muito baixo.
-                        // Solução definitiva exigiria autenticação por token persistente no WebSocket.
                         const criadorConectado = this.io.sockets.sockets.has(salas[codigoManual].criadorSocketId);
                         if (criadorConectado) {
                             socket.emit('erro_criar_sala', 'Esse código já está em uso. Escolha outro.');
@@ -81,6 +71,17 @@ export default class SocketManager{
 
                 socket.emit('sala_criada', codigo);
                 socket.emit('atualizar_config_aluno', salas[codigo].config);
+            });
+
+            socket.on('reconectar_professor', (dados) => {
+                const { codigo } = dados;
+
+                if (!salas[codigo]) 
+                    return;
+                if(salas[codigo].criadorSocketId != socket.id){
+                    salas[codigo].criadorSocketId = socket.id;//trocar para uma novo soket id
+                }
+
             });
 
             socket.on('entrar_sala', (dados) => {
