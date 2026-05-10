@@ -19,6 +19,23 @@ export default class SocketManager{
         return this.io;
     }
 
+    encerrarSala(codigo, motivo = 'manual') {
+        if (!salas[codigo]) return;
+
+        this.io.to(codigo).emit('sala_encerrada');
+
+        const socketsNaSala = this.io.sockets.adapter.rooms.get(codigo);
+        if (socketsNaSala) {
+            const socketIds = [...socketsNaSala];
+            socketIds.forEach(socketId => {
+                this.io.sockets.sockets.get(socketId)?.leave(codigo);
+            });
+        }
+
+        delete salas[codigo];
+        console.log(`Sala ${codigo} encerrada e removida. Motivo: ${motivo}.`);
+    }
+
     start(){
         this.io.on('connection', (socket) => {
             const alunoId = socket.handshake.auth.alunoId || socket.id; 
@@ -177,20 +194,17 @@ export default class SocketManager{
             });
 
             socket.on('encerrar_sala', (codigo) => {
-                if (salas[codigo]) {
-                    this.io.to(codigo).emit('sala_encerrada');
+                this.encerrarSala(codigo, 'manual');
+            });
 
-                    const socketsNaSala = this.io.sockets.adapter.rooms.get(codigo);
-                    if (socketsNaSala) {
-                        const socketIds = [...socketsNaSala];
-                        socketIds.forEach(socketId => {
-                            this.io.sockets.sockets.get(socketId)?.leave(codigo);
-                        });
-                    }
-
-                    delete salas[codigo];
-                    console.log(`Sala ${codigo} encerrada e removida.`);
-                }
+            socket.on('disconnect', () => {
+                setTimeout(() => {
+                    Object.keys(salas).forEach(codigo => {
+                        if (salas[codigo]?.criadorSocketId === socket.id) {
+                            this.encerrarSala(codigo, 'desconexao_professor');
+                        }
+                    });
+                }, 5000);
             });
         });
     }
